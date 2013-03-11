@@ -15,62 +15,88 @@ const (
 
 func main() {
 	// Get flags set for command
-	cmd, err := getCommand()
-	handle(err, "Failed to get arguments as JSON")
-	fmt.Printf("%v\n", cmd)
+	cmd := getCommand()
+	fmt.Printf("%s\n", cmd.JsonArgs)
 }
 
 type NetCommand struct {
-	name     string
-	flagSet  flag.FlagSet
-	method   string
-	url      string
-	jsonArgs []byte
+	*flag.FlagSet
+	Name       string
+	HttpMethod string
+	Url        string
+	JsonArgs   []byte
 }
 
 func (c *NetCommand) Exec() (err error) {
-	req, err := http.NewRequest(c.method, c.url, nil)
-	handle(err, "Failed to create request for "+c.name)
+	req, err := http.NewRequest(c.HttpMethod, c.Url, nil)
+	handle(err, "Failed to create request for "+c.Name)
 	resp, err := http.DefaultClient.Do(req)
 	respDump, _ := httputil.DumpResponse(resp, true)
 	fmt.Printf("%s", respDump)
 	return err
 }
 
+/*
+func NewNetCommand() *NetCommand {
+	c := &NetCommand{}
+	c.FlagSet.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
+		c.FlagSet.PrintDefaults()
+	}
+	return c
+}
+*/
+
 type Repository struct {
-	name,
-	description,
-	scm,
-	language string
-	isPrivate bool
+	Name,
+	Description,
+	Scm,
+	Language string
+	IsPrivate bool
 }
 
-func getCommand() (*NetCommand, error) {
+func getCommand() *NetCommand {
 	// User must specify a command
-	if len(os.Args) > 2 {
+	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "create":
-			return getCreateCmd(), nil
+			return getCreateCmd()
+		default:
+			printUsage()
 		}
 	}
-	return nil, fmt.Errorf("usage: repo create [--n name] [--d description] [--scm git|hg] [--lang code] [-p is_private]")
+	printUsage()
+	panic("invalid getCommand")
+}
+
+func printUsage() {
+	fmt.Fprintln(os.Stderr, "usage: repo create\n\n\"repo [command] -help\" for details") // Change to template later
+	os.Exit(2)
 }
 
 func getCreateCmd() *NetCommand {
-	createFlags := flag.NewFlagSet("create", flag.ExitOnError)
-	repo := Repository{
-		name:        *createFlags.String("--n", "", "name of the repository"),
-		description: *createFlags.String("--d", "", "description of the repository"),
-		scm:         *createFlags.String("--scm", "hg", "git|hg. Default hg"),
+	// Define flags
+	repo := Repository{}
+	createCmd := &NetCommand{Name: "create", flag.FlagSet: flag.NewFlagSet("create", flag.ExitOnError)}
+	createCmd.StringVar(&repo.Name, "n", "", "name of the repository. Required")
+	createCmd.StringVar(&repo.Description, "d", "", "description of the repository")
+	createCmd.StringVar(&repo.Scm, "scm", "hg", "git|hg. Default hg")
+	createCmd.StringVar(&repo.Language, "lang", "", "coding language")
+	createCmd.BoolVar(&repo.IsPrivate, "p", false, "is repository private. Default false (publicly viewable)")
+	// Get flags
+	createCmd.Parse(os.Args[2:])
+
+	// Require repo name
+	if len(repo.Name) == 0 {
+		fmt.Fprintln(os.Stderr, "A repository name is required [-n name]\n")
+		createCmd.FlagSet.PrintDefaults()
+		os.Exit(2)
 	}
+	// Marshall arguments into JSON and store in command
 	jsonArgs, err := json.Marshal(repo)
 	handle(err, "Failed to marshall arguments")
-	createCmd := NetCommand{
-		name:     "create",
-		jsonArgs: jsonArgs,
-	}
-
-	return &createCmd
+	createCmd.JsonArgs = jsonArgs
+	return createCmd
 }
 
 func handle(err error, msg string) {
@@ -79,6 +105,6 @@ func handle(err error, msg string) {
 			fmt.Fprintf(os.Stderr, "\nERROR: %v\n\n", msg)
 		}
 		fmt.Fprintf(os.Stderr, "%v\n\n", err)
-		os.Exit(1)
+		os.Exit(2)
 	}
 }
